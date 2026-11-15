@@ -1,96 +1,112 @@
 # Bot de Anime Dublado (Java + IA generativa)
 
-Bot de terminal que usa um modelo de linguagem (Gemini, no plano gratuito, ou Claude) para duas tarefas:
+Bot de terminal que usa um modelo de linguagem para três tarefas:
 
-1. **Identificar o anime** a partir de uma descrição solta, como "o anime do pirata que estica".
-2. **Descobrir em qual episódio a pessoa parou**, mesmo sem lembrar o número, e avisar se o próximo já saiu dublado em português.
+1. **Identificar o anime** a partir de uma descrição solta, como "um anime de um cara que volta no tempo, o nome dele é Subaru".
+2. **Descobrir em qual episódio a pessoa parou**, mesmo sem lembrar o número, comparando as pistas dela com título e sinopse reais dos episódios.
+3. **Dizer se o próximo episódio já está dublado em português**, lendo a página da Crunchyroll.
 
 ## Por que existe
 
-Quem assiste dublado perde o fio: não lembra o nome do anime nem o episódio. Regex e seletores não resolvem isso, porque o problema é entender linguagem natural. Foi por isso que usei um LLM, e o foco do projeto é usar o modelo **com confiabilidade**.
+Quem assiste dublado perde o fio: não lembra o nome do anime nem o episódio, e ainda precisa abrir o site para ver se a dublagem saiu. Regex e seletores não resolvem a primeira parte, porque o problema é entender linguagem natural. Por isso usei um LLM, e o foco do projeto é usá-lo **com confiabilidade**: o modelo sugere, o código confere.
 
 ## Como funciona
 
 ~~~mermaid
 flowchart LR
-  A[Pessoa descreve o anime] --> B[LLM propõe até 3 candidatos em JSON]
-  B --> C{Existe no catálogo (AniList)?}
+  A[Pessoa descreve o anime] --> B[LLM propõe candidatos em JSON]
+  B --> C{Existe no catálogo AniList?}
   C -- não --> D[Descartado]
   C -- sim --> E[Pessoa confirma]
-  E --> F[LLM cruza pistas com a lista de episódios]
-  F --> G{Episódio está na lista e confiança >= 0.6?}
-  G -- não --> H[Faz outra pergunta]
-  G -- sim --> I[Checa dublagem: sim, nao ou incerto]
+  E --> F[AniList lista as temporadas]
+  F --> G[TVmaze/Kitsu trazem título e sinopse dos episódios]
+  G --> H[LLM cruza as pistas com os episódios]
+  H --> I{Episódio existe na lista e confiança >= 0,6?}
+  I -- não --> J[Faz outra pergunta]
+  I -- sim --> K[Navegador sem janela lê a Crunchyroll]
+  K --> L[Resposta: dublado, só legendado ou incerto]
 ~~~
 
 ## Decisões de design
 
 - **O modelo propõe, o código decide.** O modelo responde só em JSON e o código valida cada campo antes de usar.
 - **Defesa contra alucinação em camadas.** Título que não existe no catálogo é descartado. Episódio fora da lista é rejeitado. Confiança abaixo de 0,6 vira pergunta, não chute. Resposta que não é JSON vira pergunta, não erro.
-- **Nunca afirma dublagem sem fonte.** A checagem fica atrás da interface `DubStatusProvider`. A implementação atual responde sempre "incerto", e o bot diz isso claramente.
-- **Testável sem internet.** O modelo fica atrás da interface `Llm` e o catálogo fica atrás da interface `Catalogo` (AniList por padrão, Jikan/MyAnimeList como opção pela variável `CATALOGO`), então os testes usam dublês e não gastam API.
+- **Dados reais no lugar de memória do modelo.** O AniList só informa o número dos episódios. O bot busca título e sinopse no TVmaze (e na Kitsu como reserva) e só aceita a lista se a quantidade de episódios bater com a da temporada. Foi a correção mais importante: sem isso, o modelo "chutava" o episódio.
+- **Nunca afirma dublagem sem fonte.** A checagem fica atrás da interface `DubStatusProvider`. Se a página não mostrar o episódio, o bot diz "não dá para afirmar".
+- **Sem API não oficial e sem credencial.** A Crunchyroll não tem API pública para isso. O bot abre a página pública no Chrome/Edge do próprio computador, sem janela, rola a lista até os episódios carregarem e lê o rótulo `Dub | Leg`. Se o navegador falhar, tenta ler um arquivo salvo pela pessoa e, por último, pergunta.
+- **Testável sem internet.** O modelo fica atrás da interface `Llm` e o catálogo atrás da interface `Catalogo`, então os testes usam dublês e não gastam API. São 41 testes.
+- **Troca de modelo sem mexer na regra de negócio.** Groq, Gemini e Claude implementam a mesma interface. Se o modelo padrão do Groq não estiver liberado na conta, o bot consulta a lista de modelos da chave e escolhe outro.
 - **Falhas de rede tratadas.** Erros 429 e 5xx tentam de novo com espera crescente. Os demais sobem com mensagem clara.
-- **Temporadas.** Depois de confirmar o anime, o bot segue as ligações de prequel e sequência no AniList, lista as temporadas e pergunta em qual a pessoa está. Se ela não souber, o modelo sugere a temporada a partir das pistas e a pessoa confirma. Sem isso, a lista de episódios seria sempre a da primeira temporada.
-- **O modelo sempre vê a pergunta junto com a resposta.** Um "sim" sozinho não diz nada; "Pergunta: é a segunda temporada? Resposta: sim" diz.
-- **Troca de modelo sem mexer na regra de negócio.** Gemini e Claude implementam a mesma interface `Llm`, e a `LlmFactory` escolhe qual usar por variável de ambiente.
 - **Segredo fora do código.** A chave da API vem de variável de ambiente.
-
-## Avaliação
-
-A classe `Avaliacao` testa a identificação com 10 descrições conhecidas, incluindo um anime que não existe (o certo é recusar).
-
-- Resultado: **[PREENCHER] de 10** (modelo `claude-haiku-5-5`, data da execução: **[PREENCHER]**)
-- Casos que erraram e o que mudei nos prompts por causa disso: **[PREENCHER]**
 
 ## Como rodar
 
-Requisitos: Java 17+, Maven 3.8+ e uma chave de API. O caminho gratuito usa o Gemini (chave em aistudio.google.com/apikey, sem cartão). Também funciona com a API do Claude.
+Requisitos: Java 17+, Maven 3.8+, Chrome ou Edge instalado (para a dublagem) e uma chave de API gratuita.
 
 ~~~bash
-# Linux/Mac: Gemini (gratuito)
-export GEMINI_API_KEY="sua-chave"
-# Windows PowerShell: $env:GEMINI_API_KEY="sua-chave"
-
-# Opcional: usar o Claude no lugar
-# export ANTHROPIC_API_KEY="sua-chave" e LLM_PROVIDER=claude
+# Groq (gratuito, console.groq.com, sem cartão)
+# Windows CMD (sem aspas):  set GROQ_API_KEY=sua-chave
+# PowerShell:               $env:GROQ_API_KEY="sua-chave"
+# Linux/Mac:                export GROQ_API_KEY="sua-chave"
 
 mvn -q compile exec:java
 ~~~
 
-Variáveis opcionais: `GEMINI_MODEL` (padrão `gemini-3.8-flash`), `ANIME_BOT_MODEL` (modelo do Claude) e `LLM_PROVIDER` (`gemini` ou `claude`).
+Alternativas: `GEMINI_API_KEY` (aistudio.google.com/apikey) ou `ANTHROPIC_API_KEY`. Se houver mais de uma, a `LlmFactory` usa Groq, depois Gemini, depois Claude; `LLM_PROVIDER` força a escolha.
 
-Testes: `mvn test`. Avaliação: `mvn -q compile exec:java -Dexec.mainClass=bot.Avaliacao`.
+Variáveis opcionais: `GROQ_MODEL`, `GEMINI_MODEL`, `ANIME_BOT_MODEL`, `CATALOGO` (`anilist` ou `jikan`) e `CHROME_PATH` (caminho do navegador, se não estiver no lugar padrão).
 
-## Exemplo de conversa
+Testes: `mvn test`.
 
-**[PREENCHER com uma conversa real copiada do terminal]**
+## Exemplo de conversa (execução real)
+
+~~~text
+Qual anime? Pode descrever do seu jeito: um anime de um cara que volta no tempo o nome dele é subaru
+Você quis dizer "Re:ZERO -Starting Life in Another World-"? (s/n) s
+
+Esse anime tem 5 temporadas:
+  1) Re:ZERO -Starting Life in Another World- (25 episódios)
+  2) Re:ZERO -Starting Life in Another World- Season 2 (13 episódios)
+  3) Re:ZERO -Starting Life in Another World- Season 2 Part 2 (12 episódios)
+  4) Re:ZERO -Starting Life in Another World- Season 3 (16 episódios)
+  5) Re:ZERO -Starting Life in Another World- Season 4 (19 episódios)
+Qual temporada você está assistindo? (número, ou Enter se não souber)
+Sem problema. Lembra de alguma saga ou arco, de um personagem novo ou de uma cena marcante? ele entra em um castelo no deserto e conhece uma personagem chamada shaula
+Pelas suas pistas, parece ser "... Season 2 Part 2". É essa? (s/n) n
+Vou usar a temporada mais recente: Re:ZERO -Starting Life in Another World- Season 4.
+(Achei títulos e sinopses de 19 episódios.)
+Qual foi o último episódio que você viu dublado? (número, ou 'não lembro') não lembro
+Foi o episódio 4 (A White Sky Asterism - Subaru and company meet Shaula, keeper of the Pleiades Watchtower...)? (s/n) s
+
+O episódio 5 de Re:ZERO -Starting Life in Another World- Season 4 já aparece como dublado na Crunchyroll.
+~~~
+
+Note que o palpite de temporada (S2 Part 2) estava errado e a pessoa recusou: o bot usou a mais recente. O episódio foi achado pela cena descrita (castelo no deserto + Shaula).
+
+## Avaliação
+
+A classe `Avaliacao` testa a identificação com 10 descrições conhecidas, incluindo um anime que não existe (o certo é recusar). Para rodar: `mvn -q compile exec:java -Dexec.mainClass=bot.Avaliacao`.
+
+Resultado da última execução: _a ser adicionado após a execução com o modelo atual (Groq)_.
 
 ## Limitações conhecidas
 
-- Ainda não há fonte pública confiável de dublagem integrada, então a resposta sobre dublagem é "incerto".
-- O AniList tem limite de requisições por minuto e nem sempre informa o título de cada episódio: quando falta, a lista traz só o número. A Jikan (não oficial) pode ficar fora do ar ou inacessível em algumas redes, por isso não é o padrão.
+- **Temporada:** a sugestão do modelo parte só dos títulos das temporadas, sem sinopse, e já errou no teste acima. A pessoa sempre confirma, e a escolha manual pelo número é a mais confiável.
+- **Dublagem do último episódio:** a página da Crunchyroll carrega os episódios aos poucos. Nos testes o bot leu 13 de 19 episódios da temporada 4, então para os episódios finais ele responde "não dá para afirmar" em vez de chutar. O episódio seguinte ao que a pessoa viu foi lido corretamente.
+- **Dublagem é a do catálogo em português da Crunchyroll**, não a data em que saiu. Depende do layout da página, que pode mudar.
+- A Crunchyroll pode bloquear programas automáticos. Nesse caso o bot cai para o arquivo `crunchyroll.html` (página salva com Ctrl+S) ou pergunta à pessoa.
 - A busca usa o primeiro resultado do catálogo, que pode casar com um anime parecido. Por isso a pessoa sempre confirma o título.
-- O plano gratuito do Gemini tem limite de requisições por minuto e por dia, então o cliente espera entre as chamadas e a avaliação leva alguns minutos. O Google pode usar o conteúdo enviado no plano gratuito para melhorar seus produtos: não envie dados pessoais.
-- Animes muito longos enviam uma lista grande de episódios ao modelo, o que aumenta custo e tempo.
+- Os planos gratuitos (Groq, Gemini) têm limite de requisições e podem usar o conteúdo enviado: não envie dados pessoais.
 - Funciona só no terminal.
 
 ## Próximos passos
 
-- Implementar um `DubStatusProvider` com fonte real de dublagem.
+- Interface web (repositório separado).
+- Rolagem mais robusta na Crunchyroll para ler todos os episódios.
 - Cache da lista de episódios.
-- API REST e aviso automático por Telegram.
+- Aviso automático por Telegram quando o episódio sair dublado.
 - Mais casos na avaliação, incluindo descrições em inglês.
 
 ## Tecnologias
 
-Java 17, Maven, Jackson, JUnit 5, API do Gemini (Google) e do Claude (Anthropic) e API do AniList (com Jikan/MyAnimeList como alternativa).
-
-
-## IA gratuita: Groq
-Defina `GROQ_API_KEY` (console.groq.com, sem cartão). Modelo padrão `llama-3.3-70b-versatile` (troque com `GROQ_MODEL`). Se houver `GROQ_API_KEY`, ela tem prioridade sobre as outras.
-
-## Títulos e sinopses dos episódios (Kitsu)
-O AniList só devolve números de episódio. Quando não há títulos, o bot busca título + sinopse na Kitsu (API gratuita, sem chave) e o modelo compara com suas pistas (ex.: "castelo no deserto", "Shaula" → Re:Zero S4, ep. 3-4). Se a Kitsu falhar, o bot segue só com os números e pergunta mais.
-
-## Dublagem (Crunchyroll)
-Cada cartão de episódio da página em português traz um rótulo (`Dub | Leg`, `Dublado` ou `Legendado`). O bot tenta, em ordem: (1) baixar a página pública da série (o link vem do AniList); (2) abrir a página no seu Chrome/Edge sem janela (`--headless --dump-dom`) e ler o resultado depois que o JavaScript monta a página; (3) ler `crunchyroll.html`, salvo pelo navegador com Ctrl+S ("Página da Web, completa"); (4) ler `crunchyroll.txt`; (5) perguntar à pessoa. Não usa API não oficial nem credenciais. Limitação: a Crunchyroll pode bloquear o download automático (passo 1) e o rótulo mostra a dublagem do catálogo em português, não a data de estreia.
+Java 17, Maven, Jackson, JUnit 5, Groq / Gemini / Claude (LLM), AniList, TVmaze e Kitsu (dados de episódios), Chrome DevTools Protocol (leitura da Crunchyroll).
