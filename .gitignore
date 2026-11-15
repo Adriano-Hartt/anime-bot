@@ -1,0 +1,8 @@
+target/
+.idea/
+*.iml
+.vscode/
+.env
+crunchyroll.txt
+crunchyroll.html
+crunchyroll_files/
