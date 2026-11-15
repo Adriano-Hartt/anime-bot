@@ -29,7 +29,7 @@ public class Main {
 
             String plataforma = perguntar(in, "Em qual plataforma você assiste (ou quer assistir)? ");
             List<String> episodios = catalogo.listarEpisodios(anime.id());
-            episodios = enriquecer(episodios, anime, escolha.deslocamento());
+            episodios = Fluxo.enriquecer(episodios, anime, escolha.deslocamento());
             int ultimo = descobrirUltimoEpisodio(in, servico, anime, episodios, escolha.pistas());
             if (ultimo == 0) {
                 System.out.println("Não consegui descobrir o episódio. Se lembrar o número, rode de novo.");
@@ -38,7 +38,7 @@ public class Main {
 
             int total = episodios.size();
             String[] fonte = new String[1];
-            DubStatusCrunchyroll daPagina = resolverDublagem(catalogo, anime, fonte, total);
+            DubStatusCrunchyroll daPagina = Fluxo.resolverDublagem(catalogo, anime, fonte, total);
             DubStatusProvider dublagem = daPagina != null ? daPagina : new DubStatusProviderIncerto();
             String status = dublagem.proximoEpisodioDublado(anime.id(), ultimo + 1);
             String statusUltimo = dublagem.proximoEpisodioDublado(anime.id(), total);
@@ -113,7 +113,7 @@ public class Main {
         }
         String r = perguntar(in, "Qual temporada você está assistindo? (número, ou Enter se não souber) ");
         if (r.matches("\\d{1,2}") && Integer.parseInt(r) >= 1 && Integer.parseInt(r) <= temporadas.size()) {
-            return new Escolha(daTemporada(temporadas.get(Integer.parseInt(r) - 1), anime), "", antes(temporadas, Integer.parseInt(r) - 1));
+            return new Escolha(daTemporada(temporadas.get(Integer.parseInt(r) - 1), anime), "", Fluxo.antes(temporadas, Integer.parseInt(r) - 1));
         }
 
         // não sabe a temporada: descobre pelas pistas
@@ -125,49 +125,14 @@ public class Main {
             if (numero > 0) {
                 Temporada sugerida = temporadas.get(numero - 1);
                 String ok = perguntar(in, "Pelas suas pistas, parece ser \"" + sugerida.titulo() + "\". É essa? (s/n) ");
-                if (ok.toLowerCase().startsWith("s")) return new Escolha(daTemporada(sugerida, anime), pistas, antes(temporadas, numero - 1));
+                if (ok.toLowerCase().startsWith("s")) return new Escolha(daTemporada(sugerida, anime), pistas, Fluxo.antes(temporadas, numero - 1));
             }
         } catch (Exception e) {
             System.out.println("Não consegui descobrir a temporada pelas pistas.");
         }
         Temporada maisRecente = temporadas.get(temporadas.size() - 1);
         System.out.println("Vou usar a temporada mais recente: " + maisRecente.titulo() + ".");
-        return new Escolha(daTemporada(maisRecente, anime), pistas, antes(temporadas, temporadas.size() - 1));
-    }
-
-    /** Soma os episódios das temporadas anteriores; -1 se alguma não tiver o total conhecido. */
-    private static int antes(List<Temporada> temporadas, int indice) {
-        int soma = 0;
-        for (int i = 0; i < indice; i++) {
-            if (temporadas.get(i).episodios() == null) return -1;
-            soma += temporadas.get(i).episodios();
-        }
-        return soma;
-    }
-
-    /** Se o catálogo só deu números, tenta trazer título e sinopse reais para o modelo comparar com as pistas. */
-    private static List<String> enriquecer(List<String> episodios, Anime anime, int deslocamento) {
-        boolean semTitulos = episodios.stream().allMatch(l -> l.replaceFirst("^\\d+:?\\s*", "").isBlank());
-        if (!semTitulos) return episodios;
-
-        List<String> ricos = new TvmazeClient().episodios(nomeDaSerie(anime.titulo()), deslocamento, episodios.size());
-        if (ricos.isEmpty()) {
-            // Kitsu só vale se a quantidade de episódios bater exatamente; senão seriam episódios de outra temporada
-            List<String> kitsu = new KitsuClient().episodiosDetalhados(anime.titulo(), episodios.size());
-            if (kitsu.size() == episodios.size()) ricos = kitsu;
-        }
-        if (ricos.isEmpty()) {
-            System.out.println("(Não consegui títulos dos episódios; vou usar só os números.)");
-            return episodios;
-        }
-        System.out.println("(Achei títulos e sinopses de " + ricos.size() + " episódios. O primeiro é: "
-                + ricos.get(0).substring(0, Math.min(70, ricos.get(0).length())) + ")");
-        return ricos;
-    }
-
-    /** "Re:ZERO -Starting Life in Another World- Season 4" -> "Re:ZERO -Starting Life in Another World-" */
-    static String nomeDaSerie(String titulo) {
-        return titulo.replaceAll("(?i)\\s+(season|temporada)\\s+\\d+.*$", "").trim();
+        return new Escolha(daTemporada(maisRecente, anime), pistas, Fluxo.antes(temporadas, temporadas.size() - 1));
     }
 
     private static Anime daTemporada(Temporada t, Anime original) {
@@ -212,49 +177,6 @@ public class Main {
             }
         }
         return "";
-    }
-
-    /** 1) baixa a página; 2) abre no Chrome/Edge sem janela; 3) lê crunchyroll.html salvo; 4) crunchyroll.txt; senão null. */
-    private static DubStatusCrunchyroll resolverDublagem(Catalogo catalogo, Anime anime, String[] fonte, int total) {
-        try {
-            var url = CrunchyrollPagina.urlPtBr(catalogo.plataformas(anime.id()));
-            if (url.isPresent()) {
-                System.out.println("\nConferindo a dublagem na Crunchyroll (pode levar até 1 minuto)...");
-                DubStatusCrunchyroll d = DubStatusCrunchyroll.doHtml(CrunchyrollPagina.baixar(url.get()));
-                if (d != null) {
-                    fonte[0] = "página da Crunchyroll baixada agora";
-                    return d;
-                }
-                String navegador = CrunchyrollPagina.acharNavegador();
-                if (navegador == null) {
-                    System.out.println("(Não achei Chrome nem Edge para abrir a página. Defina CHROME_PATH com o caminho do navegador.)");
-                } else {
-                    // a página só carrega os episódios quando alguém rola: o bot rola sozinho
-                    DubStatusCrunchyroll melhor = DubStatusCrunchyroll.doHtml(CrunchyrollPagina.baixarRolando(url.get(), total));
-                    if (melhor == null || melhor.episodiosLidos() < total) { // plano B: abrir sem rolar
-                        DubStatusCrunchyroll simples = DubStatusCrunchyroll.doHtml(CrunchyrollPagina.baixarComNavegador(url.get(), 9000));
-                        if (simples != null && (melhor == null || simples.episodiosLidos() > melhor.episodiosLidos())) melhor = simples;
-                    }
-                    if (melhor != null) {
-                        fonte[0] = "página da Crunchyroll aberta no navegador agora";
-                        return melhor;
-                    }
-                    System.out.println("(Abri a página no navegador, mas não achei os rótulos de dublagem nela.)");
-                }
-            } else {
-                System.out.println("(O catálogo não trouxe o link da Crunchyroll para essa temporada.)");
-            }
-        } catch (Exception e) {
-            System.out.println("(Erro ao consultar a Crunchyroll: " + e.getMessage() + ")");
-        }
-        for (String nome : new String[]{"crunchyroll.html", "crunchyroll.txt"}) {
-            DubStatusCrunchyroll d = DubStatusCrunchyroll.doArquivo(java.nio.file.Path.of(nome));
-            if (d != null) {
-                fonte[0] = "arquivo " + nome;
-                return d;
-            }
-        }
-        return null;
     }
 
     private static String descricao(String status, boolean manual) {

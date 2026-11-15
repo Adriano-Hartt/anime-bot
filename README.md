@@ -34,7 +34,7 @@ flowchart LR
 - **Dados reais no lugar de memória do modelo.** O AniList só informa o número dos episódios. O bot busca título e sinopse no TVmaze (e na Kitsu como reserva) e só aceita a lista se a quantidade de episódios bater com a da temporada. Foi a correção mais importante: sem isso, o modelo "chutava" o episódio.
 - **Nunca afirma dublagem sem fonte.** A checagem fica atrás da interface `DubStatusProvider`. Se a página não mostrar o episódio, o bot diz "não dá para afirmar".
 - **Sem API não oficial e sem credencial.** A Crunchyroll não tem API pública para isso. O bot abre a página pública no Chrome/Edge do próprio computador, sem janela, rola a lista até os episódios carregarem e lê o rótulo `Dub | Leg`. Se o navegador falhar, tenta ler um arquivo salvo pela pessoa e, por último, pergunta.
-- **Testável sem internet.** O modelo fica atrás da interface `Llm` e o catálogo atrás da interface `Catalogo`, então os testes usam dublês e não gastam API. São 41 testes.
+- **Testável sem internet.** O modelo fica atrás da interface `Llm` e o catálogo atrás da interface `Catalogo`, então os testes usam dublês e não gastam API. São 45 testes.
 - **Troca de modelo sem mexer na regra de negócio.** Groq, Gemini e Claude implementam a mesma interface. Se o modelo padrão do Groq não estiver liberado na conta, o bot consulta a lista de modelos da chave e escolhe outro.
 - **Falhas de rede tratadas.** Erros 429 e 5xx tentam de novo com espera crescente. Os demais sobem com mensagem clara.
 - **Segredo fora do código.** A chave da API vem de variável de ambiente.
@@ -57,6 +57,24 @@ Alternativas: `GEMINI_API_KEY` (aistudio.google.com/apikey) ou `ANTHROPIC_API_KE
 Variáveis opcionais: `GROQ_MODEL`, `GEMINI_MODEL`, `ANIME_BOT_MODEL`, `CATALOGO` (`anilist` ou `jikan`) e `CHROME_PATH` (caminho do navegador, se não estiver no lugar padrão).
 
 Testes: `mvn test`.
+
+## API para o front-end
+
+O mesmo fluxo está disponível como API HTTP local, usada pela interface web do repositório `anime-bot-front`. Usa só o servidor embutido do JDK, escuta em `127.0.0.1:8080` (variável `PORT`) e cada chamada é independente.
+
+~~~bash
+mvn -q compile exec:java -Dexec.mainClass=bot.Servidor
+~~~
+
+| Rota | O que faz |
+|---|---|
+| `POST /api/identificar` | descrição livre → candidatos confirmados no catálogo |
+| `GET /api/temporadas?id=` | temporadas da série |
+| `POST /api/temporada` | sugere a temporada pelas pistas |
+| `POST /api/episodio` | sugere o episódio pelas pistas |
+| `GET /api/dublagem?id=&episodio=` | dublagem do próximo episódio e do último da temporada |
+
+Variáveis opcionais da API: `PORT`, `HOST` (use `0.0.0.0` em servidor), `LIMITE_HORA` (chamadas por pessoa por hora, padrão 40). Há um `Dockerfile` com Java e Chromium para publicar a API.
 
 ## Exemplo de conversa (execução real)
 
@@ -101,7 +119,7 @@ Resultado da última execução: _a ser adicionado após a execução com o mode
 
 ## Próximos passos
 
-- Interface web (repositório separado).
+- Hospedar a API para a interface web funcionar sem rodar nada local.
 - Rolagem mais robusta na Crunchyroll para ler todos os episódios.
 - Cache da lista de episódios.
 - Aviso automático por Telegram quando o episódio sair dublado.

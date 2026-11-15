@@ -35,6 +35,9 @@ final class NavegadorRolagem implements WebSocket.Listener {
     private final AtomicInteger ids = new AtomicInteger();
     private final StringBuilder parcial = new StringBuilder();
     private WebSocket ws;
+    private final StringBuilder relatorio = new StringBuilder();
+    /** Resumo do que o navegador viu na última execução (para diagnóstico). */
+    static volatile String ultimoRelatorio = "";
 
     private NavegadorRolagem() {
     }
@@ -74,7 +77,10 @@ final class NavegadorRolagem implements WebSocket.Listener {
         call("Page.navigate", JSON.createObjectNode().put("url", url));
         for (int i = 0; i < 40 && !"complete".equals(avaliar("document.readyState")); i++) Thread.sleep(500);
 
-        String contar = "(function(){window.scrollBy(0,700);return document.querySelectorAll('" + seletor + "').length})()";
+        // rola a janela E leva o último cartão para a vista (funciona mesmo se a lista tiver rolagem própria)
+        String contar = "(function(){var c=document.querySelectorAll('" + seletor + "');"
+                + "if(c.length){c[c.length-1].scrollIntoView({block:'end'})}window.scrollBy(0,700);"
+                + "return c.length+'|'+document.body.scrollHeight+'|'+window.innerHeight+'|'+Math.round(window.scrollY)})()";
         // se a página tiver um botão "Mostrar mais", o bot clica (algumas temporadas só mostram parte dos episódios)
         String clicar = "(function(){var b=[].slice.call(document.querySelectorAll('button,a,[role=button]')).filter(function(e){"
                 + "return /^\\s*(mostrar mais|ver mais|show more|carregar mais)\\s*$/i.test(e.textContent||'')});"
@@ -84,8 +90,10 @@ final class NavegadorRolagem implements WebSocket.Listener {
             Thread.sleep(800);
             avaliar(clicar);
             int n;
+            String leitura = avaliar(contar);
+            relatorio.append(i).append(": cartões|altura|janela|rolagem = ").append(leitura).append('\n');
             try {
-                n = Integer.parseInt(avaliar(contar));
+                n = Integer.parseInt(leitura.split("\\|")[0]);
             } catch (NumberFormatException e) {
                 n = 0;
             }
@@ -96,6 +104,9 @@ final class NavegadorRolagem implements WebSocket.Listener {
             if (n > 0 && iguais >= 14) break; // parou de crescer há ~11 s
             if (n == 0 && iguais >= 25) break; // nada apareceu
         }
+        relatorio.append("botões na página: ").append(avaliar(
+                "[].slice.call(document.querySelectorAll('button,[role=button]')).map(function(e){return (e.textContent||'').trim().slice(0,30)}).filter(Boolean).join(' / ')")).append('\n');
+        ultimoRelatorio = relatorio.toString();
         return avaliar("document.documentElement.outerHTML");
     }
 

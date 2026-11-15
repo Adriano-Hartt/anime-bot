@@ -30,7 +30,7 @@ class TvmazeClientTest {
 
     @Test
     void tiraONumeroDaTemporadaDoNome() {
-        assertEquals("Re:ZERO -Starting Life in Another World-", Main.nomeDaSerie("Re:ZERO -Starting Life in Another World- Season 4"));
-        assertEquals("Foo", Main.nomeDaSerie("Foo Season 2 Part 2"));
+        assertEquals("Re:ZERO -Starting Life in Another World-", Fluxo.nomeDaSerie("Re:ZERO -Starting Life in Another World- Season 4"));
+        assertEquals("Foo", Fluxo.nomeDaSerie("Foo Season 2 Part 2"));
     }
 }

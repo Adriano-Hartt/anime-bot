@@ -116,4 +116,14 @@ final class CrunchyrollPagina {
         if (exe == null) return null;
         return NavegadorRolagem.baixar(exe, url, "[data-t^=episode-card]", episodiosEsperados);
     }
+
+    /** Salva o que o navegador viu, para diagnóstico quando faltam episódios. */
+    static void salvarDiagnostico(String html) {
+        try {
+            Files.writeString(Path.of("debug-crunchyroll.txt"), NavegadorRolagem.ultimoRelatorio);
+            if (html != null) Files.writeString(Path.of("debug-crunchyroll.html"), html);
+        } catch (Exception e) {
+            // diagnóstico é opcional
+        }
+    }
 }
